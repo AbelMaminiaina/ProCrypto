@@ -7,10 +7,35 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from datetime import datetime
 import requests
+import os
 from typing import Dict, Any
 
+# Import crypto blueprint
+from crypto_api import crypto_bp
+from db_manager import CryptoDatabase
+
 app = Flask(__name__)
-CORS(app)  # Permettre les requêtes depuis React
+
+# Initialize crypto database
+crypto_db = CryptoDatabase()
+
+# Configuration CORS pour autoriser le frontend Vercel et localhost
+cors_origins = [
+    "https://procrypto.vercel.app",  # Production Vercel
+    "http://localhost:3000",          # Dev local (Vite)
+    "http://localhost:5173",          # Dev local (Vite alternative)
+    "http://localhost:5000",          # Dev local
+]
+
+# Ajouter d'autres origines depuis variable d'environnement si nécessaire
+if os.getenv('ALLOWED_ORIGINS'):
+    additional_origins = os.getenv('ALLOWED_ORIGINS').split(',')
+    cors_origins.extend(additional_origins)
+
+CORS(app, origins=cors_origins, supports_credentials=True)
+
+# Register crypto blueprint
+app.register_blueprint(crypto_bp)
 
 # Import des devises et fonctions du convertisseur
 CURRENCIES = {
@@ -265,16 +290,25 @@ def health():
 
 if __name__ == '__main__':
     print("=" * 70)
-    print("🚀 API Convertisseur de Devises / Currency Converter API")
+    print("🚀 ProCrypto API - Currency Converter & Crypto Tracker")
     print("=" * 70)
     print(f"Devises supportées: {len(CURRENCIES)}")
-    print("Endpoints disponibles:")
-    print("  GET  /api/currencies      - Liste des devises")
-    print("  GET  /api/rates           - Tous les taux de change")
-    print("  POST /api/rates/refresh   - Rafraîchir les taux")
-    print("  POST /api/convert         - Convertir un montant")
-    print("  POST /api/convert/all     - Convertir vers toutes les devises")
-    print("  GET  /api/health          - État de l'API")
+    print(f"Cryptomonnaies supportées: {len(crypto_db.get_supported_cryptos())}")
+    print("\nEndpoints disponibles:")
+    print("\n  CURRENCY CONVERTER:")
+    print("  GET  /api/currencies         - Liste des devises")
+    print("  GET  /api/rates              - Tous les taux de change")
+    print("  POST /api/rates/refresh      - Rafraîchir les taux")
+    print("  POST /api/convert            - Convertir un montant")
+    print("  POST /api/convert/all        - Convertir vers toutes les devises")
+    print("  GET  /api/health             - État de l'API")
+    print("\n  CRYPTO TRACKER:")
+    print("  GET  /api/crypto/list        - Liste des cryptos supportées")
+    print("  GET  /api/crypto/prices      - Tous les prix crypto")
+    print("  GET  /api/crypto/prices/<id> - Prix d'une crypto spécifique")
+    print("  POST /api/crypto/prices/refresh - Rafraîchir tous les prix")
+    print("  GET  /api/crypto/search      - Rechercher des cryptos")
+    print("  POST /api/crypto/convert     - Convertir crypto vers fiat")
     print("=" * 70)
     print("\n🌐 Serveur démarré sur http://localhost:5000")
     print("   React frontend peut se connecter à cette API\n")
