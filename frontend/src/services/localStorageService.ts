@@ -1,7 +1,6 @@
 import { CryptoHolding } from '../types/portfolio';
 
 const PORTFOLIO_KEY = 'procrypto_portfolio';
-const VERSION_KEY = 'procrypto_version';
 const CURRENT_VERSION = 1;
 
 interface LocalStorageData {
