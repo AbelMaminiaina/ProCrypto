@@ -2,7 +2,8 @@ import axios from 'axios';
 import { ExchangeRates, ConversionResult, Currency } from '../types/currency';
 
 // URL de l'API Python backend
-const API_BASE_URL = 'http://localhost:5000/api';
+// Utilise la variable d'environnement ou localhost par défaut
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 /**
  * Get all supported currencies
