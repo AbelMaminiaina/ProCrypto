@@ -1,6 +1,12 @@
 # Convertisseur de Devises Multi-Monnaies 💱
 
+![Frontend CI](https://github.com/VOTRE_USERNAME/ProCrytpo/workflows/Frontend%20CI/CD/badge.svg)
+![Backend CI](https://github.com/VOTRE_USERNAME/ProCrytpo/workflows/Backend%20CI/CD/badge.svg)
+![Full CI](https://github.com/VOTRE_USERNAME/ProCrytpo/workflows/Full%20CI/CD%20Pipeline/badge.svg)
+
 Convertisseur de devises professionnel avec **backend Python** et **frontend React TypeScript**, supportant **11 devises internationales** avec taux de change en temps réel.
+
+> 🔄 **CI/CD automatique** avec GitHub Actions + déploiement continu sur Vercel et Render
 
 ## 🎯 Architecture
 
