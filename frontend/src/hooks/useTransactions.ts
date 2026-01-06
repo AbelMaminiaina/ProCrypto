@@ -33,7 +33,7 @@ interface UseTransactionsReturn {
  */
 export const useTransactions = (
   holdings: HoldingWithCurrentValue[],
-  prices: Map<string, CryptoPrice>
+  _prices: Map<string, CryptoPrice>
 ): UseTransactionsReturn => {
   const { isAuthenticated } = useAuth();
   const [transactions, setTransactions] = useState<Transaction[]>([]);

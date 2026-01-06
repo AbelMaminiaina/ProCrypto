@@ -100,7 +100,6 @@ export const sendPriceAlertNotification = (
     body: `Le prix ${conditionText} votre cible!\nActuel: $${currentPrice.toLocaleString()}\nCible: $${targetPrice.toLocaleString()}`,
     tag: `price-alert-${symbol}`,
     requireInteraction: true,
-    vibrate: [200, 100, 200],
   });
 };
 
