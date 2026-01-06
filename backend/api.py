@@ -5,24 +5,42 @@ Flask API for currency converter
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-from datetime import datetime
+from flask_jwt_extended import JWTManager
+from datetime import datetime, timedelta
 import requests
 import os
 from typing import Dict, Any
 
-# Import crypto blueprint
+# Import blueprints
 from crypto_api import crypto_bp
 from db_manager import CryptoDatabase
+from auth_api import auth_bp
+from portfolio_api import portfolio_bp
+from transactions_api import transactions_bp
+from alerts_api import alerts_bp
+from analytics_api import analytics_bp
+from auth_manager import AuthManager
 
 app = Flask(__name__)
 
-# Initialize crypto database
+# JWT Configuration
+app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'procrypto-secret-key-change-in-production')
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)
+app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=30)
+
+# Initialize JWT
+jwt = JWTManager(app)
+
+# Initialize databases
 crypto_db = CryptoDatabase()
+auth_manager = AuthManager()
 
 # Configuration CORS pour autoriser le frontend Vercel et localhost
 cors_origins = [
     "https://procrypto.vercel.app",  # Production Vercel
     "http://localhost:3000",          # Dev local (Vite)
+    "http://localhost:3001",          # Dev local (Vite port alternatif)
+    "http://localhost:3002",          # Dev local (Vite port alternatif)
     "http://localhost:5173",          # Dev local (Vite alternative)
     "http://localhost:5000",          # Dev local
 ]
@@ -32,10 +50,21 @@ if os.getenv('ALLOWED_ORIGINS'):
     additional_origins = os.getenv('ALLOWED_ORIGINS').split(',')
     cors_origins.extend(additional_origins)
 
-CORS(app, origins=cors_origins, supports_credentials=True)
+# Configuration CORS avec headers personnalisés pour analytics
+CORS(app,
+     origins=cors_origins,
+     supports_credentials=True,
+     allow_headers=['Content-Type', 'Authorization', 'X-Admin-Key'],
+     expose_headers=['Content-Type', 'Authorization'],
+     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
 
-# Register crypto blueprint
+# Register all blueprints
 app.register_blueprint(crypto_bp)
+app.register_blueprint(auth_bp)
+app.register_blueprint(portfolio_bp)
+app.register_blueprint(transactions_bp)
+app.register_blueprint(alerts_bp)
+app.register_blueprint(analytics_bp)
 
 # Import des devises et fonctions du convertisseur
 CURRENCIES = {
@@ -295,20 +324,55 @@ if __name__ == '__main__':
     print(f"Devises supportées: {len(CURRENCIES)}")
     print(f"Cryptomonnaies supportées: {len(crypto_db.get_supported_cryptos())}")
     print("\nEndpoints disponibles:")
-    print("\n  CURRENCY CONVERTER:")
+    print("\n  CURRENCY CONVERTER (Public):")
     print("  GET  /api/currencies         - Liste des devises")
     print("  GET  /api/rates              - Tous les taux de change")
     print("  POST /api/rates/refresh      - Rafraîchir les taux")
     print("  POST /api/convert            - Convertir un montant")
     print("  POST /api/convert/all        - Convertir vers toutes les devises")
     print("  GET  /api/health             - État de l'API")
-    print("\n  CRYPTO TRACKER:")
+    print("\n  CRYPTO TRACKER (Public):")
     print("  GET  /api/crypto/list        - Liste des cryptos supportées")
     print("  GET  /api/crypto/prices      - Tous les prix crypto")
     print("  GET  /api/crypto/prices/<id> - Prix d'une crypto spécifique")
     print("  POST /api/crypto/prices/refresh - Rafraîchir tous les prix")
     print("  GET  /api/crypto/search      - Rechercher des cryptos")
     print("  POST /api/crypto/convert     - Convertir crypto vers fiat")
+    print("\n  AUTHENTICATION:")
+    print("  POST /api/auth/register      - Créer un compte")
+    print("  POST /api/auth/login         - Se connecter")
+    print("  POST /api/auth/refresh       - Rafraîchir le token")
+    print("  GET  /api/auth/verify        - Vérifier le token (protégé)")
+    print("  GET  /api/auth/me            - Info utilisateur (protégé)")
+    print("  POST /api/auth/logout        - Se déconnecter (protégé)")
+    print("  PUT  /api/auth/change-password - Changer mot de passe (protégé)")
+    print("\n  PORTFOLIO (Protégé - JWT requis):")
+    print("  GET    /api/portfolio        - Lire portfolio")
+    print("  POST   /api/portfolio        - Ajouter crypto")
+    print("  PUT    /api/portfolio/<id>   - Modifier holding")
+    print("  DELETE /api/portfolio/<id>   - Supprimer holding")
+    print("  DELETE /api/portfolio/clear  - Vider portfolio")
+    print("\n  TRANSACTIONS (Protégé - JWT requis):")
+    print("  GET    /api/transactions     - Lire transactions")
+    print("  POST   /api/transactions     - Ajouter transaction")
+    print("  DELETE /api/transactions/<id> - Supprimer transaction")
+    print("  DELETE /api/transactions/clear - Vider transactions")
+    print("  GET    /api/transactions/crypto/<id> - Transactions par crypto")
+    print("\n  ALERTS (Protégé - JWT requis):")
+    print("  GET    /api/alerts           - Lire alertes")
+    print("  POST   /api/alerts           - Créer alerte")
+    print("  PUT    /api/alerts/<id>      - Modifier alerte")
+    print("  DELETE /api/alerts/<id>      - Supprimer alerte")
+    print("  DELETE /api/alerts/clear     - Vider alertes")
+    print("  POST   /api/alerts/<id>/trigger - Marquer comme déclenchée")
+    print("  POST   /api/alerts/<id>/toggle - Activer/désactiver")
+    print("  GET    /api/alerts/active    - Alertes actives uniquement")
+    print("\n  ANALYTICS (Tracking Public, Stats Protégées):")
+    print("  POST /api/analytics/track         - Tracker page view (public)")
+    print("  GET  /api/analytics/stats         - Statistiques globales (admin)")
+    print("  GET  /api/analytics/popular-pages - Pages populaires (admin)")
+    print("  GET  /api/analytics/daily-stats   - Stats par jour (admin)")
+    print("  GET  /api/analytics/recent-activity - Activité récente (admin)")
     print("=" * 70)
     print("\n🌐 Serveur démarré sur http://localhost:5000")
     print("   React frontend peut se connecter à cette API\n")

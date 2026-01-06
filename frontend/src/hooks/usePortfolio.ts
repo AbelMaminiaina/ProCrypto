@@ -1,95 +1,186 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { v4 as uuidv4 } from 'uuid';
 import { CryptoHolding, PortfolioMetrics, HoldingWithCurrentValue } from '../types/portfolio';
 import { CryptoPrice } from '../types/crypto';
-import * as localStorageService from '../services/localStorageService';
+import { useAuth } from '../contexts/AuthContext';
+import * as portfolioService from '../services/portfolioService';
 
 interface UsePortfolioReturn {
   holdings: CryptoHolding[];
   holdingsWithValues: HoldingWithCurrentValue[];
   metrics: PortfolioMetrics;
+  loading: boolean;
+  error: string | null;
   addHolding: (
     cryptoId: string,
     symbol: string,
     name: string,
     quantity: number,
     purchasePrice: number
-  ) => void;
-  removeHolding: (holdingId: string) => void;
-  updateHolding: (holdingId: string, quantity: number, purchasePrice: number) => void;
-  clearAllHoldings: () => void;
+  ) => Promise<void>;
+  removeHolding: (holdingId: string) => Promise<void>;
+  updateHolding: (holdingId: string, quantity: number, purchasePrice: number) => Promise<void>;
+  clearAllHoldings: () => Promise<void>;
   isInPortfolio: (cryptoId: string) => boolean;
   exportToJSON: () => void;
+  refreshPortfolio: () => Promise<void>;
 }
 
 /**
- * Hook to manage crypto portfolio with localStorage persistence
+ * Hook to manage crypto portfolio with backend API
  */
 export const usePortfolio = (prices: Map<string, CryptoPrice>): UsePortfolioReturn => {
+  const { isAuthenticated } = useAuth();
   const [holdings, setHoldings] = useState<CryptoHolding[]>([]);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Load holdings from localStorage on mount
+  // Load holdings from backend on mount or when authentication changes
+  const refreshPortfolio = useCallback(async () => {
+    if (!isAuthenticated) {
+      setHoldings([]);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const portfolioData = await portfolioService.getPortfolio();
+      // Map backend format to frontend format
+      const mappedHoldings: CryptoHolding[] = portfolioData.map((h) => ({
+        id: h.id,
+        cryptoId: h.cryptoId,
+        symbol: h.symbol,
+        name: h.name,
+        quantity: h.quantity,
+        averagePurchasePrice: h.averagePurchasePrice,
+        totalInvested: h.totalInvested,
+        addedAt: h.addedAt,
+      }));
+      setHoldings(mappedHoldings);
+    } catch (err: any) {
+      console.error('Error loading portfolio:', err);
+      setError(err.response?.data?.error || 'Erreur de chargement du portfolio');
+      setHoldings([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [isAuthenticated]);
+
   useEffect(() => {
-    const savedHoldings = localStorageService.getPortfolio();
-    setHoldings(savedHoldings);
-  }, []);
+    refreshPortfolio();
+  }, [refreshPortfolio]);
 
   // Add a new holding
   const addHolding = useCallback(
-    (
+    async (
       cryptoId: string,
       symbol: string,
       name: string,
       quantity: number,
       purchasePrice: number
     ) => {
-      const newHolding: CryptoHolding = {
-        id: uuidv4(),
-        cryptoId,
-        symbol,
-        name,
-        quantity,
-        averagePurchasePrice: purchasePrice,
-        totalInvested: quantity * purchasePrice,
-        addedAt: new Date().toISOString(),
-      };
+      if (!isAuthenticated) {
+        setError('Vous devez être connecté pour ajouter au portfolio');
+        return;
+      }
 
-      localStorageService.addHolding(newHolding);
-      setHoldings((prev) => [...prev, newHolding]);
+      setError(null);
+
+      try {
+        await portfolioService.addToPortfolio({
+          cryptoId,
+          symbol,
+          name,
+          quantity,
+          purchasePrice,
+        });
+
+        // Refresh portfolio to get updated data
+        await refreshPortfolio();
+      } catch (err: any) {
+        console.error('Error adding to portfolio:', err);
+        setError(err.response?.data?.error || 'Erreur lors de l\'ajout au portfolio');
+        throw err;
+      }
     },
-    []
+    [isAuthenticated, refreshPortfolio]
   );
 
   // Remove a holding
-  const removeHolding = useCallback((holdingId: string) => {
-    localStorageService.removeHolding(holdingId);
-    setHoldings((prev) => prev.filter((h) => h.id !== holdingId));
-  }, []);
+  const removeHolding = useCallback(
+    async (holdingId: string) => {
+      if (!isAuthenticated) {
+        setError('Vous devez être connecté');
+        return;
+      }
+
+      setError(null);
+
+      try {
+        await portfolioService.deleteHolding(holdingId);
+        // Update local state immediately for better UX
+        setHoldings((prev) => prev.filter((h) => h.id !== holdingId));
+      } catch (err: any) {
+        console.error('Error removing holding:', err);
+        setError(err.response?.data?.error || 'Erreur lors de la suppression');
+        // Refresh to restore state in case of error
+        await refreshPortfolio();
+        throw err;
+      }
+    },
+    [isAuthenticated, refreshPortfolio]
+  );
 
   // Update a holding
   const updateHolding = useCallback(
-    (holdingId: string, quantity: number, purchasePrice: number) => {
-      const updates = {
-        quantity,
-        averagePurchasePrice: purchasePrice,
-        totalInvested: quantity * purchasePrice,
-      };
+    async (holdingId: string, quantity: number, purchasePrice: number) => {
+      if (!isAuthenticated) {
+        setError('Vous devez être connecté');
+        return;
+      }
 
-      localStorageService.updateHolding(holdingId, updates);
-      setHoldings((prev) =>
-        prev.map((h) => (h.id === holdingId ? { ...h, ...updates } : h))
-      );
+      setError(null);
+
+      try {
+        await portfolioService.updateHolding(holdingId, {
+          quantity,
+          purchasePrice,
+        });
+
+        // Refresh portfolio to get updated data
+        await refreshPortfolio();
+      } catch (err: any) {
+        console.error('Error updating holding:', err);
+        setError(err.response?.data?.error || 'Erreur lors de la mise à jour');
+        throw err;
+      }
     },
-    []
+    [isAuthenticated, refreshPortfolio]
   );
 
   // Clear all holdings
-  const clearAllHoldings = useCallback(() => {
-    if (window.confirm('Êtes-vous sûr de vouloir supprimer tout votre portfolio ?')) {
-      localStorageService.clearPortfolio();
-      setHoldings([]);
+  const clearAllHoldings = useCallback(async () => {
+    if (!isAuthenticated) {
+      setError('Vous devez être connecté');
+      return;
     }
-  }, []);
+
+    if (!window.confirm('Êtes-vous sûr de vouloir supprimer tout votre portfolio ?')) {
+      return;
+    }
+
+    setError(null);
+
+    try {
+      await portfolioService.clearPortfolio();
+      setHoldings([]);
+    } catch (err: any) {
+      console.error('Error clearing portfolio:', err);
+      setError(err.response?.data?.error || 'Erreur lors de la suppression');
+      throw err;
+    }
+  }, [isAuthenticated]);
 
   // Check if crypto is in portfolio
   const isInPortfolio = useCallback(
@@ -101,8 +192,17 @@ export const usePortfolio = (prices: Map<string, CryptoPrice>): UsePortfolioRetu
 
   // Export to JSON
   const exportToJSON = useCallback(() => {
-    localStorageService.exportPortfolioToJSON();
-  }, []);
+    const dataStr = JSON.stringify(holdings, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `procrypto-portfolio-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [holdings]);
 
   // Calculate holdings with current values
   const holdingsWithValues: HoldingWithCurrentValue[] = useMemo(() => {
@@ -170,11 +270,14 @@ export const usePortfolio = (prices: Map<string, CryptoPrice>): UsePortfolioRetu
     holdings,
     holdingsWithValues,
     metrics,
+    loading,
+    error,
     addHolding,
     removeHolding,
     updateHolding,
     clearAllHoldings,
     isInPortfolio,
     exportToJSON,
+    refreshPortfolio,
   };
 };

@@ -13,7 +13,7 @@ crypto_bp = Blueprint('crypto', __name__)
 # CoinGecko API configuration
 COINGECKO_API = 'https://api.coingecko.com/api/v3'
 CACHE_DURATION_SECONDS = 60
-RATE_LIMIT_CALLS_PER_MINUTE = 45
+RATE_LIMIT_CALLS_PER_MINUTE = 10  # Reduced to stay within CoinGecko free tier limits
 
 # Initialize database
 db = CryptoDatabase()
@@ -374,6 +374,245 @@ def convert_crypto_to_fiat():
             'conversions': conversions,
             'timestamp': datetime.now().isoformat()
         }), 200
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@crypto_bp.route('/api/crypto/<crypto_id>/details', methods=['GET'])
+def get_crypto_details(crypto_id):
+    """Get detailed information about a specific cryptocurrency"""
+    try:
+        # Check cache first (1 hour cache - very aggressive)
+        cached_details = db.get_cached_details(crypto_id, max_age_seconds=3600)
+        if cached_details:
+            return jsonify({
+                'success': True,
+                'details': cached_details,
+                'cached': True
+            }), 200
+
+        # RATE LIMITER DISABLED for /details endpoint to prevent user-facing errors
+        # The cache (1 hour) provides sufficient protection
+        # if not rate_limiter.can_make_call():
+        #     stale_cache = db.get_cached_details(crypto_id, max_age_seconds=86400)
+        #     if stale_cache:
+        #         return jsonify({
+        #             'success': True,
+        #             'details': stale_cache,
+        #             'cached': True,
+        #             'warning': 'Using cached data due to rate limit'
+        #         }), 200
+        #     wait_time = rate_limiter.wait_time()
+        #     return jsonify({
+        #         'success': False,
+        #         'error': f'Rate limit exceeded. Please wait {int(wait_time)} seconds.'
+        #     }), 429
+
+        # Call CoinGecko API for detailed info
+        response = requests.get(
+            f'{COINGECKO_API}/coins/{crypto_id}',
+            params={
+                'localization': 'false',
+                'tickers': 'false',
+                'community_data': 'true',
+                'developer_data': 'false'
+            },
+            timeout=10
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        # Extract relevant information
+        details = {
+            'id': data['id'],
+            'symbol': data['symbol'].upper(),
+            'name': data['name'],
+            'description': data.get('description', {}).get('en', ''),
+            'image': data.get('image', {}).get('large', ''),
+            'homepage': data.get('links', {}).get('homepage', [None])[0],
+            'blockchain_site': data.get('links', {}).get('blockchain_site', []),
+            'categories': data.get('categories', []),
+            'market_data': {
+                'current_price_usd': data['market_data']['current_price'].get('usd', 0),
+                'current_price_eur': data['market_data']['current_price'].get('eur', 0),
+                'market_cap_usd': data['market_data'].get('market_cap', {}).get('usd', 0),
+                'market_cap_rank': data.get('market_cap_rank', 0),
+                'total_volume_usd': data['market_data'].get('total_volume', {}).get('usd', 0),
+                'high_24h_usd': data['market_data'].get('high_24h', {}).get('usd', 0),
+                'low_24h_usd': data['market_data'].get('low_24h', {}).get('usd', 0),
+                'price_change_24h': data['market_data'].get('price_change_percentage_24h', 0),
+                'price_change_7d': data['market_data'].get('price_change_percentage_7d', 0),
+                'price_change_30d': data['market_data'].get('price_change_percentage_30d', 0),
+                'price_change_1y': data['market_data'].get('price_change_percentage_1y', 0),
+                'ath_usd': data['market_data'].get('ath', {}).get('usd', 0),
+                'ath_date': data['market_data'].get('ath_date', {}).get('usd', ''),
+                'ath_change_percentage': data['market_data'].get('ath_change_percentage', {}).get('usd', 0),
+                'atl_usd': data['market_data'].get('atl', {}).get('usd', 0),
+                'atl_date': data['market_data'].get('atl_date', {}).get('usd', ''),
+                'circulating_supply': data['market_data'].get('circulating_supply', 0),
+                'total_supply': data['market_data'].get('total_supply', 0),
+                'max_supply': data['market_data'].get('max_supply', 0),
+            },
+            'community_data': {
+                'twitter_followers': data.get('community_data', {}).get('twitter_followers', 0),
+                'reddit_subscribers': data.get('community_data', {}).get('reddit_subscribers', 0),
+            }
+        }
+
+        # Cache the details
+        db.cache_details(crypto_id, details)
+
+        return jsonify({
+            'success': True,
+            'details': details,
+            'cached': False
+        }), 200
+
+    except requests.exceptions.RequestException as e:
+        # Return stale cache on API error (up to 7 days old)
+        stale_cache = db.get_cached_details(crypto_id, max_age_seconds=604800)
+        if stale_cache:
+            return jsonify({
+                'success': True,
+                'details': stale_cache,
+                'cached': True,
+                'warning': f'Using cached data due to API error'
+            }), 200
+
+        return jsonify({
+            'success': False,
+            'error': f'Failed to fetch crypto details: {str(e)}'
+        }), 500
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@crypto_bp.route('/api/crypto/<crypto_id>/history', methods=['GET'])
+def get_crypto_history(crypto_id):
+    """
+    Get price history for a cryptocurrency
+    Query params: period (1d, 7d, 30d, 90d, 1y, max) - default: 7d
+    """
+    try:
+        period = request.args.get('period', '7d')
+
+        # Map period to CoinGecko days parameter
+        period_map = {
+            '1d': 1,
+            '7d': 7,
+            '30d': 30,
+            '90d': 90,
+            '1y': 365,
+            'max': 'max'
+        }
+
+        days = period_map.get(period, 7)
+
+        # Check cache first (1 hour cache - very aggressive)
+        cached_history = db.get_cached_history(crypto_id, period, max_age_seconds=3600)
+        if cached_history:
+            return jsonify({
+                **cached_history,
+                'cached': True
+            }), 200
+
+        # RATE LIMITER DISABLED for /history endpoint to prevent user-facing errors
+        # The cache (1 hour) provides sufficient protection
+        # if not rate_limiter.can_make_call():
+        #     stale_cache = db.get_cached_history(crypto_id, period, max_age_seconds=86400)
+        #     if stale_cache:
+        #         return jsonify({
+        #             **stale_cache,
+        #             'cached': True,
+        #             'warning': 'Using cached data due to rate limit'
+        #         }), 200
+        #     wait_time = rate_limiter.wait_time()
+        #     return jsonify({
+        #         'success': False,
+        #         'error': f'Rate limit exceeded. Please wait {int(wait_time)} seconds.'
+        #     }), 429
+
+        # Call CoinGecko market_chart API
+        response = requests.get(
+            f'{COINGECKO_API}/coins/{crypto_id}/market_chart',
+            params={
+                'vs_currency': 'usd',
+                'days': days,
+                'interval': 'daily' if days > 1 else 'hourly'
+            },
+            timeout=10
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        # Format price history
+        prices = [
+            {
+                'timestamp': int(price[0]),
+                'date': datetime.fromtimestamp(price[0] / 1000).isoformat(),
+                'price': price[1]
+            }
+            for price in data.get('prices', [])
+        ]
+
+        # Format market cap history
+        market_caps = [
+            {
+                'timestamp': int(mc[0]),
+                'market_cap': mc[1]
+            }
+            for mc in data.get('market_caps', [])
+        ]
+
+        # Format volume history
+        volumes = [
+            {
+                'timestamp': int(vol[0]),
+                'volume': vol[1]
+            }
+            for vol in data.get('total_volumes', [])
+        ]
+
+        history_data = {
+            'success': True,
+            'crypto_id': crypto_id,
+            'period': period,
+            'data_points': len(prices),
+            'prices': prices,
+            'market_caps': market_caps,
+            'volumes': volumes
+        }
+
+        # Cache the history
+        db.cache_history(crypto_id, period, history_data)
+
+        return jsonify({
+            **history_data,
+            'cached': False
+        }), 200
+
+    except requests.exceptions.RequestException as e:
+        # Return stale cache on API error (up to 7 days old)
+        stale_cache = db.get_cached_history(crypto_id, period, max_age_seconds=604800)
+        if stale_cache:
+            return jsonify({
+                **stale_cache,
+                'cached': True,
+                'warning': f'Using cached data due to API error'
+            }), 200
+
+        return jsonify({
+            'success': False,
+            'error': f'Failed to fetch price history: {str(e)}'
+        }), 500
 
     except Exception as e:
         return jsonify({

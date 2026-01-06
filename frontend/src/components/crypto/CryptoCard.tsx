@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { CryptoPrice } from '../../types/crypto';
 
 interface CryptoCardProps {
@@ -29,11 +30,17 @@ function CryptoCard({ crypto }: CryptoCardProps) {
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition-shadow border border-gray-100">
+    <article
+      className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition-shadow border border-gray-100"
+      aria-label={`Carte crypto ${crypto.name}`}
+    >
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 bg-gradient-to-r from-primary to-primary-dark rounded-full flex items-center justify-center text-white font-bold">
+          <div
+            className="w-10 h-10 bg-gradient-to-r from-primary to-primary-dark rounded-full flex items-center justify-center text-white font-bold"
+            aria-hidden="true"
+          >
             {crypto.symbol.charAt(0)}
           </div>
           <div>
@@ -98,7 +105,16 @@ function CryptoCard({ crypto }: CryptoCardProps) {
       <div className="mt-3 text-xs text-gray-400 text-center">
         Mis à jour: {new Date(crypto.last_updated).toLocaleTimeString('fr-FR')}
       </div>
-    </div>
+
+      {/* Details Button */}
+      <Link
+        to={`/crypto/${crypto.id}`}
+        className="mt-4 block w-full text-center bg-gradient-to-r from-primary to-primary-dark text-white font-semibold py-2 px-4 rounded-lg hover:shadow-lg transform hover:-translate-y-0.5 transition-all"
+        aria-label={`Voir les détails de ${crypto.name}`}
+      >
+        <span aria-hidden="true">📊</span> Voir détails
+      </Link>
+    </article>
   );
 }
 

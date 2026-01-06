@@ -87,3 +87,32 @@ export const convertCryptoToFiat = async (
   }
   return response.data;
 };
+
+/**
+ * Get detailed information about a specific cryptocurrency
+ */
+export const getCryptoDetails = async (cryptoId: string): Promise<any> => {
+  const response = await axios.get(`${API_URL}/crypto/${cryptoId}/details`);
+  if (!response.data.success) {
+    throw new Error(`Failed to fetch details for ${cryptoId}`);
+  }
+  return response.data.details;
+};
+
+/**
+ * Get price history for a cryptocurrency
+ * @param cryptoId - Cryptocurrency ID
+ * @param period - Time period: 1d, 7d, 30d, 90d, 1y, max
+ */
+export const getCryptoHistory = async (
+  cryptoId: string,
+  period: '1d' | '7d' | '30d' | '90d' | '1y' | 'max' = '7d'
+): Promise<any> => {
+  const response = await axios.get(`${API_URL}/crypto/${cryptoId}/history`, {
+    params: { period },
+  });
+  if (!response.data.success) {
+    throw new Error(`Failed to fetch history for ${cryptoId}`);
+  }
+  return response.data;
+};

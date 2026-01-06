@@ -1,16 +1,35 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useCryptoPrices } from '../hooks/useCryptoPrices';
 import { usePortfolio } from '../hooks/usePortfolio';
+import { useAuth } from '../contexts/AuthContext';
 import CryptoCard from '../components/crypto/CryptoCard';
 import PortfolioSummary from '../components/crypto/PortfolioSummary';
 import PortfolioList from '../components/crypto/PortfolioList';
 import AddCryptoModal from '../components/crypto/AddCryptoModal';
 
 function CryptoPortfolioPage() {
+  const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
   const { prices, pricesList, loading, error, lastUpdate, refresh } = useCryptoPrices();
   const portfolio = usePortfolio(prices);
   const [showModal, setShowModal] = useState(false);
-  const [viewMode, setViewMode] = useState<'portfolio' | 'market'>('portfolio');
+  // Start with market view for non-authenticated users
+  const [viewMode, setViewMode] = useState<'portfolio' | 'market'>(
+    isAuthenticated ? 'portfolio' : 'market'
+  );
+
+  // Filter cryptos based on authentication (freemium model)
+  // Public users: see only 10 basic cryptos (positions 40-50)
+  // Authenticated users: see all 50 cryptos
+  const displayedCryptos = useMemo(() => {
+    if (isAuthenticated) {
+      return pricesList; // All 50 cryptos
+    } else {
+      // Show only 10 less popular cryptos for public users (positions 40-50)
+      return pricesList.slice(40, 50);
+    }
+  }, [pricesList, isAuthenticated]);
 
   const handleAddCrypto = (
     cryptoId: string,
@@ -108,6 +127,22 @@ function CryptoPortfolioPage() {
           )}
         </div>
 
+        {/* Navigation Buttons */}
+        <div className="mb-6 flex justify-center gap-3 flex-wrap">
+          <button
+            onClick={() => navigate('/crypto/transactions')}
+            className="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transform hover:-translate-y-0.5 transition-all"
+          >
+            📜 Historique des Transactions
+          </button>
+          <button
+            onClick={() => navigate('/crypto/alerts')}
+            className="bg-orange-600 hover:bg-orange-700 text-white font-semibold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transform hover:-translate-y-0.5 transition-all"
+          >
+            🔔 Alertes de Prix
+          </button>
+        </div>
+
         {/* Error Message */}
         {error && (
           <div className="mb-6 bg-red-50 border-l-4 border-red-500 text-red-700 p-4 rounded max-w-4xl mx-auto">
@@ -127,18 +162,66 @@ function CryptoPortfolioPage() {
         {/* Portfolio View */}
         {viewMode === 'portfolio' && !loading && pricesList.length > 0 && (
           <main className="space-y-6">
-            {/* Portfolio Summary */}
-            <PortfolioSummary
-              metrics={portfolio.metrics}
-              holdingsCount={portfolio.holdings.length}
-            />
+            {/* Login Required Message for Portfolio */}
+            {!isAuthenticated ? (
+              <div className="bg-white rounded-2xl shadow-2xl p-8 md:p-12 max-w-3xl mx-auto text-center">
+                <div className="text-6xl mb-4">🔒</div>
+                <h2 className="text-3xl font-bold text-gray-800 mb-4">
+                  Portfolio Réservé aux Membres
+                </h2>
+                <p className="text-lg text-gray-600 mb-6">
+                  Le portfolio, les transactions et les alertes de prix nécessitent un compte gratuit.
+                </p>
+                <div className="bg-blue-50 border-l-4 border-blue-500 p-4 mb-6 text-left">
+                  <p className="font-semibold text-blue-900 mb-2">Avec un compte, vous pouvez:</p>
+                  <ul className="list-disc list-inside text-blue-800 space-y-1">
+                    <li>Suivre votre portfolio crypto en temps réel</li>
+                    <li>Gérer vos transactions d'achat/vente</li>
+                    <li>Créer des alertes de prix personnalisées</li>
+                    <li>Accéder aux 50 cryptos principales</li>
+                    <li>Exporter vos données en JSON</li>
+                  </ul>
+                </div>
+                <div className="flex gap-4 justify-center flex-wrap">
+                  <button
+                    onClick={() => navigate('/register')}
+                    className="bg-gradient-to-r from-primary to-primary-dark text-white font-bold py-3 px-8 rounded-lg shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 transition-all"
+                  >
+                    📝 Créer un compte gratuit
+                  </button>
+                  <button
+                    onClick={() => navigate('/login')}
+                    className="bg-white text-primary border-2 border-primary font-bold py-3 px-8 rounded-lg shadow-md hover:shadow-lg transform hover:-translate-y-0.5 transition-all"
+                  >
+                    🔐 Se connecter
+                  </button>
+                </div>
+                <p className="text-sm text-gray-500 mt-6">
+                  Vous pouvez consulter les prix du marché sans compte
+                </p>
+                <button
+                  onClick={() => setViewMode('market')}
+                  className="mt-3 text-primary hover:text-primary-dark font-semibold underline"
+                >
+                  → Voir les prix du marché
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Portfolio Summary */}
+                <PortfolioSummary
+                  metrics={portfolio.metrics}
+                  holdingsCount={portfolio.holdings.length}
+                />
 
-            {/* Portfolio List */}
-            {portfolio.holdingsWithValues.length > 0 && (
-              <PortfolioList
-                holdings={portfolio.holdingsWithValues}
-                onRemove={portfolio.removeHolding}
-              />
+                {/* Portfolio List */}
+                {portfolio.holdingsWithValues.length > 0 && (
+                  <PortfolioList
+                    holdings={portfolio.holdingsWithValues}
+                    onRemove={portfolio.removeHolding}
+                  />
+                )}
+              </>
             )}
           </main>
         )}
@@ -146,12 +229,39 @@ function CryptoPortfolioPage() {
         {/* Market View */}
         {viewMode === 'market' && !loading && pricesList.length > 0 && (
           <main className="space-y-6">
+            {/* Login Prompt for Public Users */}
+            {!isAuthenticated && (
+              <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-2xl shadow-2xl p-6 md:p-8 text-white">
+                <div className="text-center">
+                  <div className="text-4xl mb-3">🔓</div>
+                  <h3 className="text-2xl font-bold mb-2">
+                    Accès Limité - Mode Gratuit
+                  </h3>
+                  <p className="text-lg mb-4 opacity-90">
+                    Vous voyez seulement {displayedCryptos.length} cryptos basiques
+                  </p>
+                  <p className="mb-6 opacity-90">
+                    Connectez-vous pour accéder aux <strong>50 cryptos</strong> principales + portfolio complet + alertes de prix
+                  </p>
+                  <button
+                    onClick={() => navigate('/login')}
+                    className="bg-white text-purple-600 font-bold py-3 px-8 rounded-lg shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 transition-all"
+                  >
+                    🔐 Se connecter / S'inscrire
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Stats Summary */}
             <div className="bg-white rounded-2xl shadow-2xl p-6 md:p-8">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="text-center">
-                  <p className="text-sm text-gray-600 mb-1">Total Cryptos</p>
-                  <p className="text-3xl font-bold text-primary">{pricesList.length}</p>
+                  <p className="text-sm text-gray-600 mb-1">Cryptos Affichées</p>
+                  <p className="text-3xl font-bold text-primary">
+                    {displayedCryptos.length}
+                    {!isAuthenticated && <span className="text-lg text-gray-500"> / 50</span>}
+                  </p>
                 </div>
                 <div className="text-center">
                   <p className="text-sm text-gray-600 mb-1">Auto-Refresh</p>
@@ -167,10 +277,25 @@ function CryptoPortfolioPage() {
 
             {/* Crypto Cards Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {pricesList.map((crypto) => (
+              {displayedCryptos.map((crypto) => (
                 <CryptoCard key={crypto.id} crypto={crypto} />
               ))}
             </div>
+
+            {/* Bottom CTA for Public Users */}
+            {!isAuthenticated && (
+              <div className="bg-white rounded-2xl shadow-xl p-6 text-center border-2 border-purple-200">
+                <p className="text-gray-700 mb-4">
+                  💎 Vous manquez <strong>{pricesList.length - displayedCryptos.length} cryptos populaires</strong> (Bitcoin, Ethereum, etc.)
+                </p>
+                <button
+                  onClick={() => navigate('/login')}
+                  className="bg-gradient-to-r from-purple-600 to-blue-600 text-white font-bold py-3 px-8 rounded-lg shadow-md hover:shadow-lg transform hover:-translate-y-0.5 transition-all"
+                >
+                  🚀 Débloquer toutes les cryptos
+                </button>
+              </div>
+            )}
           </main>
         )}
 

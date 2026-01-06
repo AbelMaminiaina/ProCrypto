@@ -63,28 +63,97 @@ class CryptoDatabase:
             ON crypto_prices(last_updated)
         ''')
 
-        # Insert supported cryptos (Top 20)
+        # Table for caching crypto details (5 minute cache)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS crypto_details_cache (
+                crypto_id TEXT PRIMARY KEY,
+                details_json TEXT NOT NULL,
+                cached_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_details_cached_at
+            ON crypto_details_cache(cached_at)
+        ''')
+
+        # Table for caching crypto history (10 minute cache per period)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS crypto_history_cache (
+                crypto_id TEXT NOT NULL,
+                period TEXT NOT NULL,
+                history_json TEXT NOT NULL,
+                cached_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (crypto_id, period)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_history_cached_at
+            ON crypto_history_cache(cached_at)
+        ''')
+
+        # Insert supported cryptos (Top 50)
         supported_cryptos = [
+            # Top 10
             ('bitcoin', 'BTC', 'Bitcoin', 1),
             ('ethereum', 'ETH', 'Ethereum', 2),
             ('tether', 'USDT', 'Tether', 3),
             ('binancecoin', 'BNB', 'BNB', 4),
             ('solana', 'SOL', 'Solana', 5),
             ('ripple', 'XRP', 'XRP', 6),
-            ('cardano', 'ADA', 'Cardano', 7),
-            ('dogecoin', 'DOGE', 'Dogecoin', 8),
-            ('polkadot', 'DOT', 'Polkadot', 9),
-            ('matic-network', 'MATIC', 'Polygon', 10),
-            ('litecoin', 'LTC', 'Litecoin', 11),
-            ('chainlink', 'LINK', 'Chainlink', 12),
-            ('avalanche-2', 'AVAX', 'Avalanche', 13),
-            ('stellar', 'XLM', 'Stellar', 14),
-            ('cosmos', 'ATOM', 'Cosmos', 15),
-            ('monero', 'XMR', 'Monero', 16),
-            ('uniswap', 'UNI', 'Uniswap', 17),
-            ('vechain', 'VET', 'VeChain', 18),
-            ('algorand', 'ALGO', 'Algorand', 19),
-            ('internet-computer', 'ICP', 'Internet Computer', 20),
+            ('usd-coin', 'USDC', 'USD Coin', 7),
+            ('cardano', 'ADA', 'Cardano', 8),
+            ('dogecoin', 'DOGE', 'Dogecoin', 9),
+            ('tron', 'TRX', 'TRON', 10),
+
+            # 11-20
+            ('avalanche-2', 'AVAX', 'Avalanche', 11),
+            ('shiba-inu', 'SHIB', 'Shiba Inu', 12),
+            ('polkadot', 'DOT', 'Polkadot', 13),
+            ('chainlink', 'LINK', 'Chainlink', 14),
+            ('matic-network', 'MATIC', 'Polygon', 15),
+            ('wrapped-bitcoin', 'WBTC', 'Wrapped Bitcoin', 16),
+            ('litecoin', 'LTC', 'Litecoin', 17),
+            ('bitcoin-cash', 'BCH', 'Bitcoin Cash', 18),
+            ('dai', 'DAI', 'Dai', 19),
+            ('uniswap', 'UNI', 'Uniswap', 20),
+
+            # 21-30
+            ('stellar', 'XLM', 'Stellar', 21),
+            ('cosmos', 'ATOM', 'Cosmos', 22),
+            ('ethereum-classic', 'ETC', 'Ethereum Classic', 23),
+            ('monero', 'XMR', 'Monero', 24),
+            ('okb', 'OKB', 'OKB', 25),
+            ('filecoin', 'FIL', 'Filecoin', 26),
+            ('internet-computer', 'ICP', 'Internet Computer', 27),
+            ('hedera-hashgraph', 'HBAR', 'Hedera', 28),
+            ('aptos', 'APT', 'Aptos', 29),
+            ('the-graph', 'GRT', 'The Graph', 30),
+
+            # 31-40
+            ('vechain', 'VET', 'VeChain', 31),
+            ('near', 'NEAR', 'NEAR Protocol', 32),
+            ('algorand', 'ALGO', 'Algorand', 33),
+            ('quant-network', 'QNT', 'Quant', 34),
+            ('optimism', 'OP', 'Optimism', 35),
+            ('aave', 'AAVE', 'Aave', 36),
+            ('fantom', 'FTM', 'Fantom', 37),
+            ('theta-token', 'THETA', 'Theta Network', 38),
+            ('flow', 'FLOW', 'Flow', 39),
+            ('elrond-erd-2', 'EGLD', 'MultiversX', 40),
+
+            # 41-50 (Affichés en mode gratuit)
+            ('eos', 'EOS', 'EOS', 41),
+            ('axie-infinity', 'AXS', 'Axie Infinity', 42),
+            ('tezos', 'XTZ', 'Tezos', 43),
+            ('the-sandbox', 'SAND', 'The Sandbox', 44),
+            ('decentraland', 'MANA', 'Decentraland', 45),
+            ('zcash', 'ZEC', 'Zcash', 46),
+            ('kucoin-shares', 'KCS', 'KuCoin Token', 47),
+            ('neo', 'NEO', 'NEO', 48),
+            ('iota', 'MIOTA', 'IOTA', 49),
+            ('chiliz', 'CHZ', 'Chiliz', 50),
         ]
 
         cursor.executemany('''
@@ -274,3 +343,91 @@ class CryptoDatabase:
         conn.close()
 
         return deleted_count
+
+    def get_cached_details(self, crypto_id: str, max_age_seconds=300):
+        """Get cached crypto details (default 5 minutes)"""
+        import json
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cutoff_time = datetime.now() - timedelta(seconds=max_age_seconds)
+
+        cursor.execute('''
+            SELECT details_json, cached_at
+            FROM crypto_details_cache
+            WHERE crypto_id = ? AND cached_at > ?
+        ''', (crypto_id, cutoff_time))
+
+        row = cursor.fetchone()
+        conn.close()
+
+        if row:
+            return json.loads(row[0])
+        return None
+
+    def cache_details(self, crypto_id: str, details: dict):
+        """Cache crypto details"""
+        import json
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            INSERT OR REPLACE INTO crypto_details_cache (crypto_id, details_json, cached_at)
+            VALUES (?, ?, ?)
+        ''', (crypto_id, json.dumps(details), datetime.now()))
+
+        conn.commit()
+        conn.close()
+
+    def get_cached_history(self, crypto_id: str, period: str, max_age_seconds=600):
+        """Get cached crypto history (default 10 minutes)"""
+        import json
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cutoff_time = datetime.now() - timedelta(seconds=max_age_seconds)
+
+        cursor.execute('''
+            SELECT history_json, cached_at
+            FROM crypto_history_cache
+            WHERE crypto_id = ? AND period = ? AND cached_at > ?
+        ''', (crypto_id, period, cutoff_time))
+
+        row = cursor.fetchone()
+        conn.close()
+
+        if row:
+            return json.loads(row[0])
+        return None
+
+    def cache_history(self, crypto_id: str, period: str, history: dict):
+        """Cache crypto history"""
+        import json
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            INSERT OR REPLACE INTO crypto_history_cache (crypto_id, period, history_json, cached_at)
+            VALUES (?, ?, ?, ?)
+        ''', (crypto_id, period, json.dumps(history), datetime.now()))
+
+        conn.commit()
+        conn.close()
+
+    def clear_old_cache(self, hours=24):
+        """Clear old cached details and history"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cutoff_time = datetime.now() - timedelta(hours=hours)
+
+        cursor.execute('DELETE FROM crypto_details_cache WHERE cached_at < ?', (cutoff_time,))
+        details_deleted = cursor.rowcount
+
+        cursor.execute('DELETE FROM crypto_history_cache WHERE cached_at < ?', (cutoff_time,))
+        history_deleted = cursor.rowcount
+
+        conn.commit()
+        conn.close()
+
+        return {'details': details_deleted, 'history': history_deleted}
